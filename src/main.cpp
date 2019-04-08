@@ -28,11 +28,10 @@ display and finally sends the data to a mobile application over Bluetooth Low En
   System States
 *******************************************************************************/
 
-#define STATE_STORAGE_READY 0x1
+#define STATE_SD_READY 0x1
 #define STATE_MEMS_READY 0x2
-#define STATE_OLED_READY 0x3
-#define STATE_SD_READY 0x4
-#define STATE_WORKING 0x5
+#define STATE_LCD_READY 0x3
+#define STATE_WORKING 0x4
 
 // A generic class to manage system states. 
 class State 
@@ -83,12 +82,11 @@ bool initialize(bool wait = false)
 
 }
 
-
 /*******************************************************************************
   Storage Management
 *******************************************************************************/
 
-void writeFile(fs::FS &fs, const char * path, const char * message){
+void sd_writeFile(fs::FS &fs, const char * path, const char * message){
   
   File file = fs.open(path, FILE_WRITE);
   if(!file){
@@ -103,7 +101,7 @@ void writeFile(fs::FS &fs, const char * path, const char * message){
   file.close();
 }
 
-void appendFile(fs::FS &fs, const char * path, const char * message){
+void sd_appendFile(fs::FS &fs, const char * path, const char * message){
     File file = fs.open(path, FILE_APPEND);
     if(!file){
       Serial.println("Failed to open file for appending");
@@ -117,21 +115,18 @@ void appendFile(fs::FS &fs, const char * path, const char * message){
     file.close();
 }
 
-bool checkSDCard()
+bool sd_init()
 {
-  // state &= ~STATE_SD_READY;
   if(!SD_MMC.begin()){
     Serial.println("Card Mount Failed");
     return false;
   }
-
-  // state |= STATE_SD_READY;
   return true;
 }
 
-void log_data(String data)
+void sd_logdata(String data)
 {
-  appendFile(SD_MMC, "/memsdata.csv", data.c_str());
+  sd_appendFile(SD_MMC, "/memsdata.csv", data.c_str());
 }
 /*******************************************************************************
   LCD API:
@@ -142,6 +137,7 @@ void lcd_default_settings()
   tft.setCursor(0, 0);
   tft.setTextColor(WROVER_WHITE);  tft.setTextSize(1);
 }
+
 void lcd_print(String text) 
 {
   tft.println(text);
@@ -164,16 +160,26 @@ void process_mems(void *parameter)
     mems.gyroY = mpu6050.getGyroY();
     mems.gyroZ = mpu6050.getGyroZ();
     timer = millis();
+
     String lcd_output = "AccX" + String(mems.accX) + " AccY" + String(mems.accY) + " AccZ" + String(mems.accZ) + "\n" + 
     "GyroX" + String(mems.gyroX) + " GyroY" + String(mems.gyroY) + " GyroZ" + String(mems.gyroZ) ;
 
     String csv_output =  String(mems.accX) + ";" + String(mems.accY) + ";" + String(mems.accY) + ";"
     + String(mems.gyroX) + ";" + String(mems.gyroY) + ";" + String(mems.gyroZ) + "\n" ;
 
-    lcd_print(lcd_output);
-    log_data(csv_output);
+    log(lcd_output, csv_output);
   }
 
+}
+
+/*******************************************************************************
+  System functions
+*******************************************************************************/
+
+void log(String lcd_output = "", String csv_output = "")
+{
+  lcd_print(lcd_output);
+  sd_logdata(csv_output);
 }
 
 /*******************************************************************************
@@ -190,19 +196,22 @@ void setup()
   tft.begin();
   lcd_default_settings();
   lcd_print("\n System initialized");
+  state.set(STATE_LCD_READY);
   delay(1000);
 
   //Start MPU6050
   Wire.begin(26,27);
   mpu6050.begin();
   mpu6050.calcGyroOffsets(true);
+  state.set(STATE_MEMS_READY);
   delay(1000);
 
   //Start SD Card
-  if(checkSDCard())
+  if(sd_init())
   {
+    state.set(STATE_SD_READY);
     // create a new csv file with column headings
-    writeFile(SD_MMC, "/memsdata.csv", "accx;accy;accz;gyrox;gyroy;gyroz\r\n");
+    sd_writeFile(SD_MMC, "/memsdata.csv", "accx;accy;accz;gyrox;gyroy;gyroz\r\n");
   }
   else
   {
@@ -213,6 +222,8 @@ void setup()
   tft.println("SD card is operational.");
 
   // xTaskCreate(process_mems, "process_mems", 1000000, NULL, 1, NULL);
+
+  tft.println("System Initialization is complete");
 }
 
 /*******************************************************************************
